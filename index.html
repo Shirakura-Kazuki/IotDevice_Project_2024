@@ -1,0 +1,187 @@
+<!-- デモ操作用Webページ -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensor Selector</title>
+    <style>
+        .port-display {
+            margin: 10px;
+            font-size: 20px;
+        }
+        button {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+        }
+        .result-display {
+            margin-top: 20px;
+            font-size: 18px;
+            color: green;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Sensor Selection</h1>
+
+    <!-- センサー類ボタン -->
+    <div>
+        <button onclick="setSensor('温湿度センサー')">温湿度センサー</button>
+        <button onclick="setSensor('LED')">LED</button>
+        <button onclick="setSensor('ブザー')">ブザー</button>
+        <button onclick="setSensor('赤色LED')">赤色LED</button>
+        <button onclick="setSensor('サーボモーター')">サーボモーター</button>
+        <button onclick="setSensor('skip')">接続なし</button>
+    </div>
+
+    <hr>
+
+    <!-- PORTの表示スペース -->
+    <div class="port-display" id="port1-display">PORT 1: NO-device</div>
+    <div class="port-display" id="port2-display">PORT 2: NO-device</div>
+    <div class="port-display" id="port3-display">PORT 3: NO-device</div>
+
+    <hr>
+
+    <!-- 送信ボタン -->
+    <button onclick="sendPortInfo()">送信</button>
+    
+    <!-- リセットボタンの追加 -->
+    <button onclick="resetPorts()">リセット</button>
+
+    <!-- 再挑戦ボタンの追加 -->
+    <button onclick="stopProcessing()">再挑戦</button>
+
+    <!-- APIのレスポンスを表示するエリア -->
+    <div class="result-display" id="result-display"></div>
+
+    <script>
+        // 各PORTの初期値
+        let port1 = 'NO-device';
+        let port2 = 'NO-device';
+        let port3 = 'NO-device';
+        let stopALLProcesses = false; //停止フラグ
+
+        // センサーを順番にPORT1, PORT2, PORT3にセットする
+        function setSensor(sensorName) {
+            if (port1 === 'NO-device') {
+                port1 = sensorName;
+                document.getElementById('port1-display').innerText = `PORT 1: ${sensorName}`;
+            } else if (port2 === 'NO-device') {
+                port2 = sensorName;
+                document.getElementById('port2-display').innerText = `PORT 2: ${sensorName}`;
+            } else if (port3 === 'NO-device') {
+                port3 = sensorName;
+                document.getElementById('port3-display').innerText = `PORT 3: ${sensorName}`;
+            } else {
+                alert('全てのPORTに既にセンサーがセットされています。');
+            }
+        }
+
+        // 各ポートに非同期リクエストを順番に送信し、結果を逐次表示
+        function sendPortInfo() {
+            stopAllProcesses = false; // 再送信時にフラグをリセット
+            const portSettings = {
+                port1: port1 || 'NO-device',
+                port2: port2 || 'NO-device',
+                port3: port3 || 'NO-device'
+            };
+
+            // 送信ボタンが押された時点で表示内容をクリア
+            const resultDisplay = document.getElementById('result-display');
+            resultDisplay.innerHTML = ""; // クリア
+
+            // ポート1の処理
+            processPort('port1', portSettings.port1)
+            .then(() => processPort('port2', portSettings.port2))  // ポート2の処理
+            .then(() => processPort('port3', portSettings.port3))  // ポート3の処理
+            .catch(error => {
+                console.error('エラー:', error);
+            })
+            .finally(() => {
+                resetPorts();
+            });
+        }
+
+        //IPアドレス変数管理
+        const server_ip = '192.168.0.8';
+
+        // 各ポートの処理を行い、結果を表示する関数
+        function processPort(port, sensor) {
+            if (stopAllProcesses) {
+                console.log(`停止フラグが有効のため${port}の処理はキャンセルされました`);
+                return Promise.resolve(); // 次の処理をスキップするため、解決されたPromiseを返す
+            }
+
+            // 送信するJSONデータをコンソールに表示
+            const requestData = JSON.stringify({ sensor: sensor });
+            console.log(`Sending data to ${port}:`, requestData);
+
+            return fetch(`http://${server_ip}:5000/api/sensors/${port}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ sensor: sensor })
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('APIレスポンス:',data);
+                if(sensor === '温湿度センサー'){
+                    const temperature = data.temperature;
+                    const humidity = data.humidity;
+                displayResult(port, `温度: ${temperature}°C, 湿度: ${humidity}%`);
+                }else{
+                    displayResult(port, data[`${port}_result`]);
+                }
+            })
+            .catch(error => {
+                console.error('エラー:', error);
+            });
+        }
+
+        // 各ポートの結果を表示する関数
+        function displayResult(port, result) {
+            const resultDisplay = document.getElementById('result-display');
+            const portNumber = port.replace('port', '');
+            resultDisplay.innerHTML += `<p>PORT ${portNumber} 結果: ${result}</p>`;
+        }
+
+        // PORTのリセット
+        function resetPorts() {
+            port1 = 'NO-device';
+            port2 = 'NO-device';
+            port3 = 'NO-device';
+
+            document.getElementById('port1-display').innerText = 'PORT 1: NO-device';
+            document.getElementById('port2-display').innerText = 'PORT 2: NO-device';
+            document.getElementById('port3-display').innerText = 'PORT 3: NO-device';
+        }
+
+        // 再挑戦ボタンでラズパイ側の処理を中断
+        function stopProcessing() {
+            stopAllProcesses = true; // すべての処理を停止
+            
+            fetch('http://${server_ip}:5000/api/stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('中断:', data.message);
+                alert('処理が中断されました');
+            })
+            .catch(error => {
+                console.error('中断エラー:', error);
+            });
+        }
+    </script>
+
+    <h3>©2024年度 安田研究室 教育デバイス</h3>
+</body>
+</html>
